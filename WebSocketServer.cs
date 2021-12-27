@@ -18,7 +18,7 @@ public class WebSocketServer
     public Action<int> onClientDisconnect { get; set; }
 
     private TcpListener listener;
-    private Action<String> logCallback = Console.WriteLine;
+    private Action<object> logCallback = Console.WriteLine;
     private Dictionary<int, TcpClient> clients;
     public WebSocketServer() {
     }
@@ -76,8 +76,9 @@ public class WebSocketServer
         // Handshake
         NetworkStream stream = client.GetStream();
         // Match for Get
-        while (stream.DataAvailable && client.Available < 3);
-        string msg = Encoding.ASCII.GetString(_Read(client));
+        while (client.Available < 4);
+        byte[] data = _Read(client);
+        string msg = Encoding.ASCII.GetString(data);
 
         if (Regex.IsMatch(msg, "^GET")) {
             const string eol = "\r\n"; // HTTP/1.1 defines the sequence CR LF as the end-of-line marker
@@ -165,6 +166,7 @@ public class WebSocketServer
         
         // Cleanup
         if (opcode == 8 && onClientDisconnect != null) onClientDisconnect(id);
+        DisconnectClient(client);
         clients.Remove(id);
 
     }
@@ -249,9 +251,11 @@ public class WebSocketServer
             default : break;
         }
     } 
+    // https://datatracker.ietf.org/doc/html/draft-ietf-hybi-thewebsocketprotocol-06#section-4.5.1
     protected void DisconnectClient(TcpClient client) {
-        _Write(client, new byte[] {128 | 8});
+        _Write(client, new byte[] {0x8});
         client.Close();
+        client.Dispose();
     }
     private static void _Write(TcpClient client, byte[] msg) {
         _Write(client, msg, msg.Length);
@@ -268,7 +272,7 @@ public class WebSocketServer
         logCallback("Stopped Server");
     }
 
-    public void SetLogCallback(Action<String> logCallback) {
+    public void SetLogCallback(Action<object> logCallback) {
         this.logCallback = logCallback;
     }
 }
