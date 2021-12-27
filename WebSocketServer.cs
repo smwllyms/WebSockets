@@ -39,21 +39,21 @@ public class WebSocketServer
             logCallback("Could not start server: " + e);
         }
     }
-    public void Send(int id, object message, int opcodeType) {
+    public void Send(int id, string message) {
         TcpClient client = null;
         clients.TryGetValue(id, out client);
         if (client != null) {
-            switch (opcodeType) {
-                case 1:
-                    SendString(client, (string)message);
-                    break;
-                case 2:
-                    SendBytes(client, (byte[])message);
-                    break;
-                default: break;
-            }
+            SendString(client, message);
         }
     }
+    public void Send(int id, byte[] messsage) {
+        TcpClient client = null;
+        clients.TryGetValue(id, out client);
+        if (client != null) {
+            SendBytes(client, messsage);
+        }
+    }
+
     private void AcceptClientLoop() {
         TcpClient client;
         try {
@@ -211,12 +211,12 @@ public class WebSocketServer
         }
         else if (len < 32767) {
             encoded[1] = 126; // 126 indicates int16
-            Array.Copy(new Int16[] { (Int16) len }, 0, encoded, 2, sizeof(Int16));
+            Buffer.BlockCopy(new Int16[] { (Int16) len }, 0, encoded, 2, sizeof(Int16));
             offset += 2;
         }
         else {
             encoded[1] = 127; // 127 indicates int64
-            Array.Copy(new Int64[] { (Int64) len }, 0, encoded, 2, sizeof(Int64));
+            Buffer.BlockCopy(new Int64[] { (Int64) len }, 0, encoded, 2, sizeof(Int64));
             offset += 8;            
         }
 
@@ -227,7 +227,7 @@ public class WebSocketServer
         Send(client, Encoding.ASCII.GetBytes(msg), 1);
     }
     protected static void SendBytes(TcpClient client, byte[] msg) {
-        Send(client, msg, 1);
+        Send(client, msg, 2);
     }
     protected void SendToAll(object msg, int opcodeType) {
         switch (opcodeType) {
