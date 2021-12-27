@@ -110,44 +110,52 @@ public class WebSocketServer
 
         NetworkStream stream = client.GetStream();
 
-        bool fin, mask; int opcode = -1, msglen, offset;
+        bool fin = true, mask = false; int opcode = -1, msglen = 0;
         
         while (running) {
             try {
+                // Read exactly msglen byets
                 while (client.Connected && !stream.DataAvailable);
+                while (client.Connected && client.Available < 2);
+                // Read first 2 for length
+                byte[] encoded = _Read(client, 2);
+                fin = (encoded[0] & 0b10000000) != 0;
+                mask = (encoded[1] & 0b10000000) != 0; // must be true, "All messages from the client to the server have this bit set"
+
+                opcode = encoded[0] & 0b00001111; // expecting 1 - text message
+                if (!mask || opcode == 8) break;
+
+                msglen = encoded[1] - 128; // & 0111 1111
+                if (msglen == 126) {
+                    byte[] lenBytes = _Read(client, 2);
+                    msglen = BitConverter.ToUInt16(new byte[] { 
+                        lenBytes[1], lenBytes[0] }, 0);
+                }
+                else if (msglen == 127) {
+                    byte[] lenBytes = _Read(client, 8);
+                    msglen = BitConverter.ToUInt16(new byte[] { 
+                        lenBytes[3], lenBytes[2], lenBytes[1], lenBytes[0],
+                        lenBytes[7], lenBytes[6], lenBytes[5], lenBytes[4] }, 0);                    
+                }
+                // Wait to acquire msglen bytes
+                while (client.Connected && client.Available < msglen);
+
             } catch (Exception e) { e.ToString(); }
-            while (client.Connected && client.Available < 3);
+
             if (!client.Connected) break;
+            // Read all available bytes (msglen)
             byte[] bytes = _Read(client);
-
-            fin = (bytes[0] & 0b10000000) != 0;
-            mask = (bytes[1] & 0b10000000) != 0; // must be true, "All messages from the client to the server have this bit set"
-
-            opcode = bytes[0] & 0b00001111; // expecting 1 - text message
-            if (opcode == 8) break;
-            msglen = bytes[1] - 128; // & 0111 1111
-            offset = 2;
-
-            if (msglen == 126) {
-                // was ToUInt16(bytes, offset) but the result is incorrect
-                msglen = BitConverter.ToUInt16(new byte[] { bytes[3], bytes[2] }, 0);
-                offset = 4;
-            } else if (msglen == 127) {
-                logCallback("TODO: msglen == 127, needs qword to store msglen");
-                // i don't really know the byte order, please edit this
-                // msglen = BitConverter.ToUInt64(new byte[] { bytes[5], bytes[4], bytes[3], bytes[2], bytes[9], bytes[8], bytes[7], bytes[6] }, 0);
-                // offset = 10;
-            }
 
             if (msglen == 0)
                 logCallback("msglen == 0");
             else if (mask) {
                 byte[] decoded = new byte[msglen];
-                byte[] masks = new byte[4] { bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3] };
-                offset += 4;
+                // Decode client message
+                byte[] masks = new byte[4] { 
+                    bytes[0], bytes[1], bytes[2], bytes[3] };
 
                 for (int i = 0; i < msglen; ++i)
-                    decoded[i] = (byte)(bytes[offset + i] ^ masks[i % 4]);
+                    decoded[i] = (byte)(bytes[i] ^ masks[i % 4]);
 
                 string text = Encoding.UTF8.GetString(decoded);
                 if (onClientMessage != null) onClientMessage(id, decoded, opcode);
@@ -162,12 +170,14 @@ public class WebSocketServer
     }
 
     private static byte[] _Read(TcpClient client) {
-        int available = client.Available;
+        return _Read(client, client.Available);
+    }
+    private static byte[] _Read(TcpClient client, int length) {
         NetworkStream stream = client.GetStream();
-        byte[] msg = new byte[available];
+        byte[] msg = new byte[length];
         int i = 0;
-        while (i < available)
-            i += stream.Read(msg, i, available - i);
+        while (i < length)
+            i += stream.Read(msg, i, length - i);
 
         return msg;
     }
